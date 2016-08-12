@@ -3,7 +3,7 @@ package vm
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"html/template"
 	"net"
 	"net/http"
@@ -199,50 +199,50 @@ func (u *Ubuntu) dynamicInterfaces(networkComponents VirtualGuestNetworkComponen
 	privateComponent := networkComponents.PrimaryBackendNetworkComponent
 	publicComponent := networkComponents.PrimaryNetworkComponent
 	var interfaces []Interface
+	var subnet Subnet
 
 	if len(dynamic) == 1 {
-		if _, ok :=dynamic.First().CloudProperties["PrimaryNetworkComponent"]; !ok {
-                     if  _, ok =dynamic.First().CloudProperties["PrimaryBackendNetworkComponent"]; !ok {
-			     nw := dynamic.First()
-			     subnet, err := privateComponent.NetworkVLAN.Subnets.Containing(privateComponent.PrimaryIPAddress)
-			     if err != nil {
-				     err = bosherr.WrapErrorf(err, "%s: privateComponent: %#v", privateComponent)
-				     return nil, err
-			     }
+		if _, ok := dynamic.First().CloudProperties["PrimaryNetworkComponent"]; !ok {
+			if _, ok = dynamic.First().CloudProperties["PrimaryBackendNetworkComponent"]; !ok {
+				nw := dynamic.First()
+				subnet, err := privateComponent.NetworkVLAN.Subnets.Containing(privateComponent.PrimaryIPAddress)
+				if err != nil {
+					return interfaces, bosherr.WrapErrorf(err, "%s: privateComponent: %#v", privateComponent)
+				}
 
-			     privateInterface := Interface{
-				     Name:           fmt.Sprintf("%s%d", privateComponent.Name, privateComponent.Port),
-				     Auto:           true,
-				     AllowHotplug:   true,
-				     Address:        privateComponent.PrimaryIPAddress,
-				     Netmask:        subnet.Netmask,
-				     Gateway:        subnet.Gateway,
-				     DefaultGateway: (publicComponent.PrimaryIPAddress == "" && nw.IsDefaultGateway()),
-				     Routes:         SoftlayerPrivateRoutes(subnet.Gateway),
-			     }
-			     interfaces := append(interfaces, privateInterface)
+				privateInterface := Interface{
+					Name:           fmt.Sprintf("%s%d", privateComponent.Name, privateComponent.Port),
+					Auto:           true,
+					AllowHotplug:   true,
+					Address:        privateComponent.PrimaryIPAddress,
+					Netmask:        subnet.Netmask,
+					Gateway:        subnet.Gateway,
+					DefaultGateway: (publicComponent.PrimaryIPAddress == "" && nw.IsDefaultGateway()),
+					Routes:         SoftlayerPrivateRoutes(subnet.Gateway),
+				}
+				interfaces := append(interfaces, privateInterface)
 
-			     if publicComponent.PrimaryIPAddress != "" {
-				     for _, s := range publicComponent.NetworkVLAN.Subnets {
-					     if s.Contains(publicComponent.PrimaryIPAddress) {
-						     subnet = s
-						     break
-					     }
-				     }
-				     publicInterface := Interface{
-					     Name:           fmt.Sprintf("%s%d", publicComponent.Name, publicComponent.Port),
-					     Auto:           true,
-					     AllowHotplug:   true,
-					     Address:        publicComponent.PrimaryIPAddress,
-					     Netmask:        subnet.Netmask,
-					     Gateway:        subnet.Gateway,
-					     DefaultGateway: nw.IsDefaultGateway(),
-				     }
-				     interfaces = append(interfaces, publicInterface)
-			     }
+				if publicComponent.PrimaryIPAddress != "" {
+					for _, s := range publicComponent.NetworkVLAN.Subnets {
+						if s.Contains(publicComponent.PrimaryIPAddress) {
+							subnet = s
+							break
+						}
+					}
+					publicInterface := Interface{
+						Name:           fmt.Sprintf("%s%d", publicComponent.Name, publicComponent.Port),
+						Auto:           true,
+						AllowHotplug:   true,
+						Address:        publicComponent.PrimaryIPAddress,
+						Netmask:        subnet.Netmask,
+						Gateway:        subnet.Gateway,
+						DefaultGateway: nw.IsDefaultGateway(),
+					}
+					interfaces = append(interfaces, publicInterface)
+				}
 
-			     return interfaces, nil
-		     }
+				return interfaces, nil
+			}
 		}
 	}
 
@@ -272,8 +272,7 @@ func (u *Ubuntu) dynamicInterfaces(networkComponents VirtualGuestNetworkComponen
 			case "PrimaryBackendNetworkComponent":
 				subnet, err := privateComponent.NetworkVLAN.Subnets.Containing(privateComponent.PrimaryIPAddress)
 				if err != nil {
-					err = fmt.Errorf("%s: privateComponent: %#v", err, privateComponent)
-					return nil, err
+					return interfaces, bosherr.Errorf("%s: privateComponent: %#v", err, privateComponent)
 				}
 
 				privateInterface := Interface{
