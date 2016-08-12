@@ -282,7 +282,7 @@ func (u *Ubuntu) dynamicInterfaces(networkComponents VirtualGuestNetworkComponen
 					Address:        privateComponent.PrimaryIPAddress,
 					Netmask:        subnet.Netmask,
 					Gateway:        subnet.Gateway,
-					DefaultGateway: nw.IsDefaultGateway(),
+					DefaultGateway: (publicComponent.PrimaryIPAddress == "" && nw.IsDefaultGateway()),
 					Routes:         SoftlayerPrivateRoutes(subnet.Gateway),
 				}
 				interfaces = append(interfaces, privateInterface)
