@@ -37,7 +37,22 @@ func TimeStampForTime(now time.Time) string {
 	return now.Format("20060102-030405-") + strconv.Itoa(int(now.UnixNano()/1e6-now.Unix()*1e3))
 }
 
-func CreateVirtualGuestTemplate(stemcell bslcstem.Stemcell, cloudProps VMCloudProperties) (sldatatypes.SoftLayer_Virtual_Guest_Template, error) {
+func CreateVirtualGuestTemplate(stemcell bslcstem.Stemcell, cloudProps VMCloudProperties, networks Networks) (sldatatypes.SoftLayer_Virtual_Guest_Template, error) {
+	for _, network := range networks {
+		switch network.Type {
+		case "dynamic":
+			if _, ok := network.CloudProperties["PrimaryNetworkComponent"]; ok {
+				cloudProps.PrimaryNetworkComponent = network.CloudProperties["PrimaryNetworkComponent"].(sldatatypes.PrimaryNetworkComponent)
+			}
+
+			if _, ok := network.CloudProperties["PrimaryBackendNetworkComponent"]; ok {
+				cloudProps.PrimaryBackendNetworkComponent = network.CloudProperties["PrimaryBackendNetworkComponent"].(sldatatypes.PrimaryBackendNetworkComponent)
+			}
+		default:
+			continue
+		}
+	}
+
 	virtualGuestTemplate := sldatatypes.SoftLayer_Virtual_Guest_Template{
 		Hostname:  cloudProps.VmNamePrefix,
 		Domain:    cloudProps.Domain,

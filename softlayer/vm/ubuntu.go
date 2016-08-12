@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"html/template"
 	"net"
 	"net/http"
 	"time"
+
+	bosherr "github.com/cloudfoundry/bosh-utils/errors"
 )
 
 type Route struct {
@@ -57,7 +58,7 @@ func (s Subnets) Containing(address string) (Subnet, error) {
 		}
 	}
 
-	return Subnet{}, fmt.Errorf("subnet not found for %q", address)
+	return Subnet{}, bosherr.Errorf("subnet not found for %q", address)
 }
 
 type NetworkVLAN struct {
@@ -136,7 +137,7 @@ func (u *Ubuntu) ConfigureNetwork(networks Networks, vm VM) error {
 
 	_, err = u.SSHClient.Output("bash -c 'ifdown -a && mv /etc/network/interfaces.bosh /etc/network/interfaces && ifup -a'")
 	if err != nil {
-		return fmt.Errorf("nework configuration reload failed: %s", err)
+		return bosherr.Errorf("nework configuration reload failed: %s", err)
 	}
 
 	return nil
@@ -149,7 +150,7 @@ func (u *Ubuntu) GetInterfaces(networks Networks, virtualGuestId int) (Interface
 		return nil, err
 	}
 	if responseCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected response code: %d", responseCode)
+		return nil, bosherr.Errorf("unexpected response code: %d", responseCode)
 	}
 
 	var networkComponents VirtualGuestNetworkComponents
@@ -187,7 +188,7 @@ func categorizeNetworks(networks Networks) (Networks, Networks, error) {
 		case "manual", "":
 			manual[name] = nw
 		default:
-			return nil, nil, fmt.Errorf("unexpected network type: %s", nw.Type)
+			return nil, nil, bosherr.Errorf("unexpected network type: %s", nw.Type)
 		}
 	}
 
@@ -195,49 +196,102 @@ func categorizeNetworks(networks Networks) (Networks, Networks, error) {
 }
 
 func (u *Ubuntu) dynamicInterfaces(networkComponents VirtualGuestNetworkComponents, dynamic Networks) ([]Interface, error) {
-	if len(dynamic) != 1 {
-		return nil, errors.New("virtual guests must have exactly one dynamic network")
-	}
-
-	nw := dynamic.First()
 	privateComponent := networkComponents.PrimaryBackendNetworkComponent
 	publicComponent := networkComponents.PrimaryNetworkComponent
+	var interfaces []Interface
 
-	subnet, err := privateComponent.NetworkVLAN.Subnets.Containing(privateComponent.PrimaryIPAddress)
-	if err != nil {
-		err = fmt.Errorf("%s: privateComponent: %#v", err, privateComponent)
-		return nil, err
+	if len(dynamic) == 1 {
+		if _, ok :=dynamic.First().CloudProperties["PrimaryNetworkComponent"]; !ok {
+                     if  _, ok =dynamic.First().CloudProperties["PrimaryBackendNetworkComponent"]; !ok {
+			     nw := dynamic.First()
+			     subnet, err := privateComponent.NetworkVLAN.Subnets.Containing(privateComponent.PrimaryIPAddress)
+			     if err != nil {
+				     err = bosherr.WrapErrorf(err, "%s: privateComponent: %#v", privateComponent)
+				     return nil, err
+			     }
+
+			     privateInterface := Interface{
+				     Name:           fmt.Sprintf("%s%d", privateComponent.Name, privateComponent.Port),
+				     Auto:           true,
+				     AllowHotplug:   true,
+				     Address:        privateComponent.PrimaryIPAddress,
+				     Netmask:        subnet.Netmask,
+				     Gateway:        subnet.Gateway,
+				     DefaultGateway: (publicComponent.PrimaryIPAddress == "" && nw.IsDefaultGateway()),
+				     Routes:         SoftlayerPrivateRoutes(subnet.Gateway),
+			     }
+			     interfaces := append(interfaces, privateInterface)
+
+			     if publicComponent.PrimaryIPAddress != "" {
+				     for _, s := range publicComponent.NetworkVLAN.Subnets {
+					     if s.Contains(publicComponent.PrimaryIPAddress) {
+						     subnet = s
+						     break
+					     }
+				     }
+				     publicInterface := Interface{
+					     Name:           fmt.Sprintf("%s%d", publicComponent.Name, publicComponent.Port),
+					     Auto:           true,
+					     AllowHotplug:   true,
+					     Address:        publicComponent.PrimaryIPAddress,
+					     Netmask:        subnet.Netmask,
+					     Gateway:        subnet.Gateway,
+					     DefaultGateway: nw.IsDefaultGateway(),
+				     }
+				     interfaces = append(interfaces, publicInterface)
+			     }
+
+			     return interfaces, nil
+		     }
+		}
 	}
 
-	privateInterface := Interface{
-		Name:           fmt.Sprintf("%s%d", privateComponent.Name, privateComponent.Port),
-		Auto:           true,
-		AllowHotplug:   true,
-		Address:        privateComponent.PrimaryIPAddress,
-		Netmask:        subnet.Netmask,
-		Gateway:        subnet.Gateway,
-		DefaultGateway: (publicComponent.PrimaryIPAddress == "" && nw.IsDefaultGateway()),
-		Routes:         SoftlayerPrivateRoutes(subnet.Gateway),
-	}
-	interfaces := []Interface{privateInterface}
+	for _, nw := range dynamic {
+		for name, _ := range nw.CloudProperties {
+			switch name {
+			case "PrimaryNetworkComponent":
+				if publicComponent.PrimaryIPAddress != "" {
+					for _, s := range publicComponent.NetworkVLAN.Subnets {
+						if s.Contains(publicComponent.PrimaryIPAddress) {
+							subnet = s
+							break
+						}
+					}
+					publicInterface := Interface{
+						Name:           fmt.Sprintf("%s%d", publicComponent.Name, publicComponent.Port),
+						Auto:           true,
+						AllowHotplug:   true,
+						Address:        publicComponent.PrimaryIPAddress,
+						Netmask:        subnet.Netmask,
+						Gateway:        subnet.Gateway,
+						DefaultGateway: nw.IsDefaultGateway(),
+					}
+					interfaces = append(interfaces, publicInterface)
+					continue
+				}
+			case "PrimaryBackendNetworkComponent":
+				subnet, err := privateComponent.NetworkVLAN.Subnets.Containing(privateComponent.PrimaryIPAddress)
+				if err != nil {
+					err = fmt.Errorf("%s: privateComponent: %#v", err, privateComponent)
+					return nil, err
+				}
 
-	if publicComponent.PrimaryIPAddress != "" {
-		for _, s := range publicComponent.NetworkVLAN.Subnets {
-			if s.Contains(publicComponent.PrimaryIPAddress) {
-				subnet = s
-				break
+				privateInterface := Interface{
+					Name:           fmt.Sprintf("%s%d", privateComponent.Name, privateComponent.Port),
+					Auto:           true,
+					AllowHotplug:   true,
+					Address:        privateComponent.PrimaryIPAddress,
+					Netmask:        subnet.Netmask,
+					Gateway:        subnet.Gateway,
+					DefaultGateway: nw.IsDefaultGateway(),
+					Routes:         SoftlayerPrivateRoutes(subnet.Gateway),
+				}
+				interfaces = append(interfaces, privateInterface)
+				continue
+			default:
+				continue
 			}
 		}
-		publicInterface := Interface{
-			Name:           fmt.Sprintf("%s%d", publicComponent.Name, publicComponent.Port),
-			Auto:           true,
-			AllowHotplug:   true,
-			Address:        publicComponent.PrimaryIPAddress,
-			Netmask:        subnet.Netmask,
-			Gateway:        subnet.Gateway,
-			DefaultGateway: nw.IsDefaultGateway(),
-		}
-		interfaces = append(interfaces, publicInterface)
 	}
 
 	return interfaces, nil
@@ -280,7 +334,7 @@ func (u *Ubuntu) manualInterfaces(networkComponents VirtualGuestNetworkComponent
 			continue
 		}
 
-		return nil, errors.New("manual subnet not found")
+		return nil, bosherr.Error("manual subnet not found")
 	}
 
 	return interfaces, nil
