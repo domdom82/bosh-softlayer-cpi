@@ -41,15 +41,31 @@ func CreateVirtualGuestTemplate(stemcell bslcstem.Stemcell, cloudProps VMCloudPr
 	for _, network := range networks {
 		switch network.Type {
 		case "dynamic":
-			if _, ok := network.CloudProperties["PrimaryNetworkComponent"]; ok {
-				for _, value := range network.CloudProperties {
-					cloudProps.PrimaryNetworkComponent = value.(sldatatypes.PrimaryNetworkComponent)
+			if value, ok := network.CloudProperties["PrimaryNetworkComponent"]; ok {
+				networkComponent := value.(map[string]interface{})
+				if value1, ok := networkComponent["NetworkVlan"]; ok {
+					networkValn := value1.(map[string]interface{})
+					if value2, ok := networkValn["Id"]; ok {
+						cloudProps.PrimaryNetworkComponent =  sldatatypes.PrimaryNetworkComponent{
+							NetworkVlan:  sldatatypes.NetworkVlan{
+								Id: int(value2.(float64)),
+							},
+						}
+					}
 				}
 			}
 
-			if _, ok := network.CloudProperties["PrimaryBackendNetworkComponent"]; ok {
-				for _, value := range network.CloudProperties {
-					cloudProps.PrimaryBackendNetworkComponent = value.(sldatatypes.PrimaryBackendNetworkComponent)
+			if value, ok := network.CloudProperties["PrimaryBackendNetworkComponent"]; ok {
+				networkComponent := value.(map[string]interface{})
+				if value1, ok := networkComponent["NetworkVlan"]; ok {
+					networkValn := value1.(map[string]interface{})
+					if value2, ok := networkValn["Id"]; ok {
+						cloudProps.PrimaryBackendNetworkComponent =  sldatatypes.PrimaryBackendNetworkComponent{
+							NetworkVlan:  sldatatypes.NetworkVlan{
+								Id: int(value2.(float64)),
+							},
+						}
+					}
 				}
 			}
 		default:
