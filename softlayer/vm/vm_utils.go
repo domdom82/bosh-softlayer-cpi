@@ -41,12 +41,16 @@ func CreateVirtualGuestTemplate(stemcell bslcstem.Stemcell, cloudProps VMCloudPr
 	for _, network := range networks {
 		switch network.Type {
 		case "dynamic":
-			if value, ok := network.CloudProperties["PrimaryNetworkComponent"]; ok {
-				cloudProps.PrimaryNetworkComponent = value.(sldatatypes.PrimaryNetworkComponent)
+			if _, ok := network.CloudProperties["PrimaryNetworkComponent"]; ok {
+				for _, value := range network.CloudProperties {
+					cloudProps.PrimaryNetworkComponent = value.(sldatatypes.PrimaryNetworkComponent)
+				}
 			}
 
-			if value, ok := network.CloudProperties["PrimaryBackendNetworkComponent"]; ok {
-				cloudProps.PrimaryBackendNetworkComponent = value.(sldatatypes.PrimaryBackendNetworkComponent)
+			if _, ok := network.CloudProperties["PrimaryBackendNetworkComponent"]; ok {
+				for _, value := range network.CloudProperties {
+					cloudProps.PrimaryBackendNetworkComponent = value.(sldatatypes.PrimaryBackendNetworkComponent)
+				}
 			}
 		default:
 			continue
